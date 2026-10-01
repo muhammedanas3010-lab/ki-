@@ -1,0 +1,983 @@
+<html lang="ml">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KAIZ SOOQ - Business Management Platform</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        function App() {
+            // Main State Management
+            const [currentPage, setCurrentPage] = useState('dashboard');
+            
+            // Load state from LocalStorage
+            const [orders, setOrders] = useState(() => {
+                const saved = localStorage.getItem('kaiz_orders');
+                return saved ? JSON.parse(saved) : [];
+            });
+            
+            const [employees, setEmployees] = useState(() => {
+                const saved = localStorage.getItem('kaiz_employees');
+                return saved ? JSON.parse(saved) : ['Anu', 'Umma', 'Nusrath', 'Meema'];
+            });
+
+            // Form States
+            const [newEmpName, setNewEmpName] = useState('');
+            const [editingEmpIndex, setEditingEmpIndex] = useState(null);
+            
+            const [editingOrderId, setEditingOrderId] = useState(null);
+            const [orderForm, setOrderForm] = useState({
+                customerName: '',
+                whatsapp: '',
+                platform: 'BEBI',
+                dressCode: '',
+                price: '',
+                advance: '',
+                totalCost: '',
+                stitchingCharge: '',
+                assignedEmp: '',
+                deliveryDate: '',
+                status: 'pending' // 'pending' or 'completed'
+            });
+
+            // Analysis Date Filters
+            const [analysisStartDate, setAnalysisStartDate] = useState('');
+            const [analysisEndDate, setAnalysisEndDate] = useState('');
+
+            // Save to LocalStorage on change
+            useEffect(() => {
+                localStorage.setItem('kaiz_orders', JSON.stringify(orders));
+            }, [orders]);
+
+            useEffect(() => {
+                localStorage.setItem('kaiz_employees', JSON.stringify(employees));
+            }, [employees]);
+
+            // Helper: Order Financial Calculations
+            const calculateOrderMetrics = (order) => {
+                const price = parseFloat(order.price) || 0;
+                const advance = parseFloat(order.advance) || 0;
+                const cost = parseFloat(order.totalCost) || 0;
+                const stitching = parseFloat(order.stitchingCharge) || 0;
+
+                const totalExpense = cost + stitching;
+                const grossProfit = price - totalExpense;
+
+                let anuProfit = 0;
+                let remainingProfit = 0;
+
+                if (grossProfit > 0) {
+                    if (grossProfit >= 300) {
+                        anuProfit = 300;
+                        remainingProfit = grossProfit - 300;
+                    } else {
+                        anuProfit = grossProfit;
+                        remainingProfit = 0;
+                    }
+                }
+
+                const extraAdvance = advance > price ? advance - price : 0;
+
+                return {
+                    price,
+                    advance,
+                    cost,
+                    stitching,
+                    totalExpense,
+                    grossProfit,
+                    anuProfit,
+                    remainingProfit,
+                    extraAdvance
+                };
+            };
+
+            // Metrics Calculations for Dashboard
+            const getMetrics = () => {
+                let totalRevenue = 0;
+                let totalExpense = 0;
+                let totalProfit = 0;
+
+                let bebiProfit = 0;
+                let bebiExpense = 0;
+                let lediProfit = 0;
+                let lediExpense = 0;
+
+                let completedOrders = 0;
+                let remainingOrders = 0;
+
+                orders.forEach(ord => {
+                    const m = calculateOrderMetrics(ord);
+                    if (ord.status === 'completed') {
+                        completedOrders++;
+                    } else {
+                        remainingOrders++;
+                    }
+
+                    totalRevenue += m.price;
+                    totalExpense += m.totalExpense;
+                    totalProfit += m.grossProfit;
+
+                    if (ord.platform === 'BEBI') {
+                        bebiProfit += m.grossProfit;
+                        bebiExpense += m.totalExpense;
+                    } else if (ord.platform === 'LEDI') {
+                        lediProfit += m.grossProfit;
+                        lediExpense += m.totalExpense;
+                    }
+                });
+
+                return {
+                    totalRevenue,
+                    totalExpense,
+                    totalProfit,
+                    bebiProfit,
+                    bebiExpense,
+                    lediProfit,
+                    lediExpense,
+                    completedOrders,
+                    remainingOrders
+                };
+            };
+
+            const metrics = getMetrics();
+
+            // Next Deliveries Logic
+            const getNextDeliveries = () => {
+                const pendingOrders = orders.filter(o => o.status === 'pending' && o.deliveryDate);
+                if (pendingOrders.length === 0) return [];
+
+                // Sort by date ascending
+                pendingOrders.sort((a, b) => new Date(a.deliveryDate) - new Date(b.deliveryDate));
+                
+                const earliestDate = pendingOrders[0].deliveryDate;
+                // Get all orders on the earliest date
+                return pendingOrders.filter(o => o.deliveryDate === earliestDate);
+            };
+
+            // Customer Order Count
+            const getCustomerOrderCount = (phoneOrName) => {
+                if (!phoneOrName) return 0;
+                return orders.filter(o => 
+                    (o.whatsapp && o.whatsapp === phoneOrName) || 
+                    (o.customerName.toLowerCase() === phoneOrName.toLowerCase())
+                ).length;
+            };
+
+            // Form Handlers
+            const handleSaveOrder = (e) => {
+                e.preventDefault();
+                if (editingOrderId) {
+                    setOrders(orders.map(o => o.id === editingOrderId ? { ...orderForm, id: editingOrderId } : o));
+                    setEditingOrderId(null);
+                } else {
+                    const newOrder = {
+                        ...orderForm,
+                        id: Date.now().toString(),
+                        createdAt: new Date().toISOString()
+                    };
+                    setOrders([...orders, newOrder]);
+                }
+                // Reset Form
+                setOrderForm({
+                    customerName: '',
+                    whatsapp: '',
+                    platform: 'BEBI',
+                    dressCode: '',
+                    price: '',
+                    advance: '',
+                    totalCost: '',
+                    stitchingCharge: '',
+                    assignedEmp: '',
+                    deliveryDate: '',
+                    status: 'pending'
+                });
+                setCurrentPage('orders');
+            };
+
+            const handleEditOrder = (order) => {
+                setOrderForm(order);
+                setEditingOrderId(order.id);
+                setCurrentPage('addOrder');
+            };
+
+            const handleDeleteOrder = (id) => {
+                if (confirm('ഈ ഓർഡർ ഡിലീറ്റ് ചെയ്യണം എന്ന് ഉറപ്പാണോ?')) {
+                    setOrders(orders.filter(o => o.id !== id));
+                }
+            };
+
+            const toggleOrderStatus = (id) => {
+                setOrders(orders.map(o => {
+                    if (o.id === id) {
+                        return { ...o, status: o.status === 'pending' ? 'completed' : 'pending' };
+                    }
+                    return o;
+                }));
+            };
+
+            // Employee Handlers
+            const handleAddEmployee = (e) => {
+                e.preventDefault();
+                if (!newEmpName.trim()) return;
+                
+                if (editingEmpIndex !== null) {
+                    const updated = [...employees];
+                    updated[editingEmpIndex] = newEmpName.trim();
+                    setEmployees(updated);
+                    setEditingEmpIndex(null);
+                } else {
+                    setEmployees([...employees, newEmpName.trim()]);
+                }
+                setNewEmpName('');
+            };
+
+            const handleEditEmp = (index) => {
+                setNewEmpName(employees[index]);
+                setEditingEmpIndex(index);
+            };
+
+            const handleDeleteEmp = (index) => {
+                if (confirm('ഈ എംപ്ലോയിയെ ഒഴിവാക്കണം എന്ന് ഉറപ്പാണോ?')) {
+                    setEmployees(employees.filter((_, i) => i !== index));
+                }
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col md:flex-row">
+                    {/* Sidebar Navigation */}
+                    <aside className="w-full md:w-64 bg-slate-900 text-white p-5 flex flex-col justify-between">
+                        <div>
+                            <div className="flex items-center space-x-3 mb-8">
+                                <div className="bg-indigo-600 p-2 rounded-lg text-2xl font-bold">KS</div>
+                                <div>
+                                    <h1 className="font-extrabold text-xl tracking-wider">KAIZ SOOQ</h1>
+                                    <p className="text-xs text-slate-400">BEBI & LEDI Management</p>
+                                </div>
+                            </div>
+
+                            <nav className="space-y-2">
+                                <button 
+                                    onClick={() => setCurrentPage('dashboard')}
+                                    className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition ${currentPage === 'dashboard' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800 text-slate-300'}`}>
+                                    <i className="fa-solid fa-chart-pie"></i>
+                                    <span>ഡാഷ്‌ബോർഡ്</span>
+                                </button>
+
+                                <button 
+                                    onClick={() => {
+                                        setEditingOrderId(null);
+                                        setOrderForm({ customerName: '', whatsapp: '', platform: 'BEBI', dressCode: '', price: '', advance: '', totalCost: '', stitchingCharge: '', assignedEmp: '', deliveryDate: '', status: 'pending' });
+                                        setCurrentPage('addOrder');
+                                    }}
+                                    className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition ${currentPage === 'addOrder' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800 text-slate-300'}`}>
+                                    <i className="fa-solid fa-circle-plus"></i>
+                                    <span>New Order</span>
+                                </button>
+
+                                <button 
+                                    onClick={() => setCurrentPage('orders')}
+                                    className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition ${currentPage === 'orders' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800 text-slate-300'}`}>
+                                    <i className="fa-solid fa-list-check"></i>
+                                    <span>പെൻഡിംഗ് ഓർഡറുകൾ</span>
+                                </button>
+
+                                <button 
+                                    onClick={() => setCurrentPage('completedOrders')}
+                                    className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition ${currentPage === 'completedOrders' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800 text-slate-300'}`}>
+                                    <i className="fa-solid fa-box-archive"></i>
+                                    <span>പൂർത്തിയായവ</span>
+                                </button>
+
+                                <button 
+                                    onClick={() => setCurrentPage('employees')}
+                                    className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition ${currentPage === 'employees' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800 text-slate-300'}`}>
+                                    <i className="fa-solid fa-users"></i>
+                                    <span>ജീവനക്കാർ</span>
+                                </button>
+
+                                <button 
+                                    onClick={() => setCurrentPage('analysis')}
+                                    className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition ${currentPage === 'analysis' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800 text-slate-300'}`}>
+                                    <i className="fa-solid fa-chart-line"></i>
+                                    <span>അനാലിസിസ്</span>
+                                </button>
+                            </nav>
+                        </div>
+                        <div className="mt-8 text-xs text-slate-500 text-center border-t border-slate-800 pt-4">
+                            &copy; 2026 KAIZ SOOQ
+                        </div>
+                    </aside>
+
+                    {/* Main Content Area */}
+                    <main className="flex-1 p-4 md:p-8 overflow-y-auto">
+                        
+                        {/* 1. DASHBOARD PAGE */}
+                        {currentPage === 'dashboard' && (
+                            <div className="space-y-6">
+                                <h2 className="text-2xl font-bold text-slate-800">മെയിൻ ഡാഷ്‌ബോർഡ്</h2>
+
+                                {/* Top Stat Cards */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                                    <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                                        <div>
+                                            <p className="text-sm font-semibold text-slate-400">Total Revenue</p>
+                                            <h3 className="text-2xl font-black text-emerald-600 mt-1">₹{metrics.totalRevenue.toLocaleString()}</h3>
+                                        </div>
+                                        <div className="bg-emerald-50 p-4 rounded-xl text-emerald-600 text-xl"><i className="fa-solid fa-wallet"></i></div>
+                                    </div>
+
+                                    <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                                        <div>
+                                            <p className="text-sm font-semibold text-slate-400">Total Profit</p>
+                                            <h3 className="text-2xl font-black text-indigo-600 mt-1">₹{metrics.totalProfit.toLocaleString()}</h3>
+                                        </div>
+                                        <div className="bg-indigo-50 p-4 rounded-xl text-indigo-600 text-xl"><i className="fa-solid fa-arrow-trend-up"></i></div>
+                                    </div>
+
+                                    <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                                        <div>
+                                            <p className="text-sm font-semibold text-slate-400">Total Expense</p>
+                                            <h3 className="text-2xl font-black text-rose-600 mt-1">₹{metrics.totalExpense.toLocaleString()}</h3>
+                                        </div>
+                                        <div className="bg-rose-50 p-4 rounded-xl text-rose-600 text-xl"><i className="fa-solid fa-receipt"></i></div>
+                                    </div>
+                                </div>
+
+                                {/* Platform Breakdown (BEBI & LEDI) */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                    <div className="bg-gradient-to-br from-pink-500 to-rose-600 text-white p-6 rounded-2xl shadow-md">
+                                        <div className="flex justify-between items-center mb-4">
+                                            <h4 className="text-xl font-bold">BEBI Platform</h4>
+                                            <span className="bg-white/20 px-3 py-1 rounded-full text-xs">Kids Fashion</span>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4 mt-2">
+                                            <div>
+                                                <p className="text-xs text-rose-100">BEBI Profit</p>
+                                                <p className="text-2xl font-bold">₹{metrics.bebiProfit.toLocaleString()}</p>
+                                            </div>
+                                            <div>
+                                                <p className="text-xs text-rose-100">BEBI Expense</p>
+                                                <p className="text-2xl font-bold">₹{metrics.bebiExpense.toLocaleString()}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-gradient-to-br from-indigo-500 to-purple-600 text-white p-6 rounded-2xl shadow-md">
+                                        <div className="flex justify-between items-center mb-4">
+                                            <h4 className="text-xl font-bold">LEDI Platform</h4>
+                                            <span className="bg-white/20 px-3 py-1 rounded-full text-xs">Women Fashion</span>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4 mt-2">
+                                            <div>
+                                                <p className="text-xs text-indigo-100">LEDI Profit</p>
+                                                <p className="text-2xl font-bold">₹{metrics.lediProfit.toLocaleString()}</p>
+                                            </div>
+                                            <div>
+                                                <p className="text-xs text-indigo-100">LEDI Expense</p>
+                                                <p className="text-2xl font-bold">₹{metrics.lediExpense.toLocaleString()}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Status Overview & Next Delivery */}
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                                    <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                                        <p className="text-xs text-slate-400 font-semibold uppercase">ഓർഡറുകളുടെ സ്റ്റാറ്റസ്</p>
+                                        <div className="mt-4 space-y-3">
+                                            <div className="flex justify-between items-center p-3 bg-amber-50 rounded-xl">
+                                                <span className="text-amber-700 font-medium text-sm">Remaining Orders</span>
+                                                <span className="bg-amber-500 text-white px-3 py-1 rounded-full font-bold text-sm">{metrics.remainingOrders}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center p-3 bg-emerald-50 rounded-xl">
+                                                <span className="text-emerald-700 font-medium text-sm">Completed Orders</span>
+                                                <span className="bg-emerald-500 text-white px-3 py-1 rounded-full font-bold text-sm">{metrics.completedOrders}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center p-3 bg-blue-50 rounded-xl">
+                                                <span className="text-blue-700 font-medium text-sm">Total Employees</span>
+                                                <span className="bg-blue-500 text-white px-3 py-1 rounded-full font-bold text-sm">{employees.length}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Next Delivery Alert Box */}
+                                    <div className="md:col-span-2 bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+                                        <div className="flex justify-between items-center mb-3">
+                                            <h4 className="font-bold text-slate-800 flex items-center space-x-2">
+                                                <i className="fa-solid fa-truck-fast text-indigo-600"></i>
+                                                <span>അടുത്ത ഡെലിവറി പ്രയോറിറ്റി (Next Delivery)</span>
+                                            </h4>
+                                        </div>
+                                        {getNextDeliveries().length > 0 ? (
+                                            <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <span className="text-xs font-bold text-indigo-600 bg-indigo-200 px-2.5 py-1 rounded-md">
+                                                        തീയതി: {getNextDeliveries()[0].deliveryDate}
+                                                    </span>
+                                                    <span className="text-xs text-indigo-500 font-semibold">{getNextDeliveries().length} പേർക്ക് ഒരേ ദിവസം ഡെലിവറി</span>
+                                                </div>
+                                                <div className="divide-y divide-indigo-100">
+                                                    {getNextDeliveries().map(item => (
+                                                        <div key={item.id} className="py-2 flex justify-between items-center">
+                                                            <div>
+                                                                <p className="font-bold text-slate-800">{item.customerName}</p>
+                                                                <p className="text-xs text-slate-500">Dress: {item.dressCode} ({item.platform})</p>
+                                                            </div>
+                                                            <span className="text-xs bg-white text-indigo-700 border border-indigo-200 px-2 py-1 rounded font-medium">
+                                                                Worker: {item.assignedEmp || 'Unassigned'}
+                                                            </span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="text-center py-8 text-slate-400">
+                                                <i className="fa-regular fa-calendar-check text-3xl mb-2"></i>
+                                                <p>അടുത്ത ഡെലിവറി ഓർഡറുകൾ ഒന്നും നിലവിലില്ല!</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 2. ADD / EDIT ORDER PAGE */}
+                        {currentPage === 'addOrder' && (
+                            <div className="max-w-2xl mx-auto bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                                <h2 className="text-2xl font-bold mb-6 text-slate-800">
+                                    {editingOrderId ? 'ഓർഡർ എഡിറ്റ് ചെയ്യുക' : 'പുതിയ ഓർഡർ ആഡ് ചെയ്യുക'}
+                                </h2>
+                                <form onSubmit={handleSaveOrder} className="space-y-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-600 block mb-1">Customer Name *</label>
+                                            <input 
+                                                type="text" required
+                                                value={orderForm.customerName}
+                                                onChange={e => setOrderForm({...orderForm, customerName: e.target.value})}
+                                                className="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" 
+                                                placeholder="പേര് നൽകുക"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-600 block mb-1">WhatsApp Number</label>
+                                            <input 
+                                                type="text" 
+                                                value={orderForm.whatsapp}
+                                                onChange={e => setOrderForm({...orderForm, whatsapp: e.target.value})}
+                                                className="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" 
+                                                placeholder="വാട്സാപ്പ് നമ്പർ"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-600 block mb-1">Platform Choice</label>
+                                            <select 
+                                                value={orderForm.platform}
+                                                onChange={e => setOrderForm({...orderForm, platform: e.target.value})}
+                                                className="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                                                <option value="BEBI">BEBI (Kids)</option>
+                                                <option value="LEDI">LEDI (Women)</option>
+                                            </select>
+                                        </div>
+
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-600 block mb-1">Dress Code / Details</label>
+                                            <input 
+                                                type="text" 
+                                                value={orderForm.dressCode}
+                                                onChange={e => setOrderForm({...orderForm, dressCode: e.target.value})}
+                                                className="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" 
+                                                placeholder="ഉദാ: Frock Pattern 01"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Financial Section */}
+                                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 space-y-4">
+                                        <p className="text-xs font-bold text-indigo-600 uppercase">Financial Form</p>
+                                        
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="text-xs font-bold text-slate-600 block mb-1">Price (വിൽപന വില) *</label>
+                                                <input 
+                                                    type="number" required
+                                                    value={orderForm.price}
+                                                    onChange={e => setOrderForm({...orderForm, price: e.target.value})}
+                                                    className="w-full p-2.5 bg-white border border-slate-200 rounded-lg outline-none" 
+                                                    placeholder="₹ 0"
+                                                />
+                                            </div>
+
+                                            <div>
+                                                <label className="text-xs font-bold text-slate-600 block mb-1">Advance Amount</label>
+                                                <input 
+                                                    type="number" 
+                                                    value={orderForm.advance}
+                                                    onChange={e => setOrderForm({...orderForm, advance: e.target.value})}
+                                                    className="w-full p-2.5 bg-white border border-slate-200 rounded-lg outline-none" 
+                                                    placeholder="₹ 0"
+                                                />
+                                                {/* Live Extra Advance Alert */}
+                                                {parseFloat(orderForm.advance) > parseFloat(orderForm.price) && (
+                                                    <span className="text-[10px] text-emerald-600 font-bold block mt-1">
+                                                        Extra Advance: ₹{parseFloat(orderForm.advance) - parseFloat(orderForm.price)}
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            <div>
+                                                <label className="text-xs font-bold text-slate-600 block mb-1">Total Fabric/Cost</label>
+                                                <input 
+                                                    type="number" 
+                                                    value={orderForm.totalCost}
+                                                    onChange={e => setOrderForm({...orderForm, totalCost: e.target.value})}
+                                                    className="w-full p-2.5 bg-white border border-slate-200 rounded-lg outline-none" 
+                                                    placeholder="₹ 0"
+                                                />
+                                            </div>
+
+                                            <div>
+                                                <label className="text-xs font-bold text-slate-600 block mb-1">Stitching Charge</label>
+                                                <input 
+                                                    type="number" 
+                                                    value={orderForm.stitchingCharge}
+                                                    onChange={e => setOrderForm({...orderForm, stitchingCharge: e.target.value})}
+                                                    className="w-full p-2.5 bg-white border border-slate-200 rounded-lg outline-none" 
+                                                    placeholder="₹ 0"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-600 block mb-1">Assigned Employee</label>
+                                            <select 
+                                                value={orderForm.assignedEmp}
+                                                onChange={e => setOrderForm({...orderForm, assignedEmp: e.target.value})}
+                                                className="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                                                <option value="">ജീവനക്കാരനെ തിരെഞ്ഞെടുക്കുക</option>
+                                                {employees.map((emp, i) => (
+                                                    <option key={i} value={emp}>{emp}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+
+                                        <div>
+                                            <label className="text-xs font-bold text-slate-600 block mb-1">Delivery Date</label>
+                                            <input 
+                                                type="date" 
+                                                value={orderForm.deliveryDate}
+                                                onChange={e => setOrderForm({...orderForm, deliveryDate: e.target.value})}
+                                                className="w-full p-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="pt-4 flex justify-end space-x-3">
+                                        <button 
+                                            type="button" 
+                                            onClick={() => setCurrentPage('orders')}
+                                            className="px-5 py-2.5 rounded-lg border border-slate-200 text-slate-600 font-medium">
+                                            Cancel
+                                        </button>
+                                        <button 
+                                            type="submit" 
+                                            className="px-5 py-2.5 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 transition">
+                                            {editingOrderId ? 'ഓർഡർ അപ്‌ഡേറ്റ് ചെയ്യുക' : 'സേവ് ചെയ്യുക'}
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        )}
+
+                        {/* 3. PENDING ORDERS PAGE */}
+                        {currentPage === 'orders' && (
+                            <div className="space-y-4">
+                                <div className="flex justify-between items-center">
+                                    <h2 className="text-2xl font-bold text-slate-800">പെൻഡിംഗ് ഓർഡറുകൾ</h2>
+                                    <button 
+                                        onClick={() => setCurrentPage('addOrder')}
+                                        className="bg-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-indigo-700">
+                                        <i className="fa-solid fa-plus mr-2"></i>Add Order
+                                    </button>
+                                </div>
+
+                                <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-left text-sm">
+                                            <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-semibold">
+                                                <tr>
+                                                    <th className="p-4">Customer</th>
+                                                    <th className="p-4">Platform / Dress</th>
+                                                    <th className="p-4">Finances</th>
+                                                    <th className="p-4">Profit Splitting</th>
+                                                    <th className="p-4">Worker</th>
+                                                    <th className="p-4">Delivery Date</th>
+                                                    <th className="p-4 text-center">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {orders.filter(o => o.status === 'pending').map(ord => {
+                                                    const m = calculateOrderMetrics(ord);
+                                                    const count = getCustomerOrderCount(ord.whatsapp || ord.customerName);
+                                                    return (
+                                                        <tr key={ord.id} className="hover:bg-slate-50/50">
+                                                            <td className="p-4">
+                                                                <p className="font-bold text-slate-800">{ord.customerName}</p>
+                                                                <p className="text-xs text-slate-400">{ord.whatsapp}</p>
+                                                                <span className="inline-block mt-1 bg-indigo-50 text-indigo-700 text-[10px] px-2 py-0.5 rounded-full font-bold">
+                                                                    Total Orders: {count}
+                                                                </span>
+                                                            </td>
+                                                            <td className="p-4">
+                                                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${ord.platform === 'BEBI' ? 'bg-pink-100 text-pink-700' : 'bg-purple-100 text-purple-700'}`}>
+                                                                    {ord.platform}
+                                                                </span>
+                                                                <p className="text-xs mt-1 font-medium text-slate-700">{ord.dressCode}</p>
+                                                            </td>
+                                                            <td className="p-4 text-xs space-y-1">
+                                                                <div>Price: <span className="font-bold">₹{m.price}</span></div>
+                                                                <div>Adv: <span className="font-bold">₹{m.advance}</span> 
+                                                                    {m.extraAdvance > 0 && <span className="text-emerald-600 font-bold ml-1">(Ex: ₹{m.extraAdvance})</span>}
+                                                                </div>
+                                                                <div className="text-slate-400">Exp: ₹{m.totalExpense}</div>
+                                                            </td>
+                                                            <td className="p-4 text-xs">
+                                                                <div className="text-indigo-600 font-bold">Anu Profit: ₹{m.anuProfit}</div>
+                                                                <div className="text-slate-500">Main Profit: ₹{m.remainingProfit}</div>
+                                                            </td>
+                                                            <td className="p-4 text-xs font-semibold text-slate-600">
+                                                                {ord.assignedEmp || 'Unassigned'}
+                                                            </td>
+                                                            <td className="p-4 text-xs font-medium text-slate-600">
+                                                                {ord.deliveryDate || 'N/A'}
+                                                            </td>
+                                                            <td className="p-4 text-center space-x-2">
+                                                                <button 
+                                                                    onClick={() => toggleOrderStatus(ord.id)}
+                                                                    title="Mark as Complete"
+                                                                    className="bg-emerald-100 text-emerald-700 p-2 rounded-lg hover:bg-emerald-200">
+                                                                    <i className="fa-solid fa-check"></i>
+                                                                </button>
+                                                                <button 
+                                                                    onClick={() => handleEditOrder(ord)}
+                                                                    className="bg-blue-100 text-blue-700 p-2 rounded-lg hover:bg-blue-200">
+                                                                    <i className="fa-solid fa-pen"></i>
+                                                                </button>
+                                                                <button 
+                                                                    onClick={() => handleDeleteOrder(ord.id)}
+                                                                    className="bg-rose-100 text-rose-700 p-2 rounded-lg hover:bg-rose-200">
+                                                                    <i className="fa-solid fa-trash"></i>
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                        {orders.filter(o => o.status === 'pending').length === 0 && (
+                                            <div className="text-center py-8 text-slate-400">പെൻഡിംഗ് ഓർഡറുകൾ ലഭ്യമല്ല</div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 4. COMPLETED ORDERS PAGE */}
+                        {currentPage === 'completedOrders' && (
+                            <div className="space-y-4">
+                                <h2 className="text-2xl font-bold text-slate-800">പൂർത്തിയായ ഓർഡറുകൾ (Completed)</h2>
+
+                                <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-left text-sm">
+                                            <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-semibold">
+                                                <tr>
+                                                    <th className="p-4">Customer</th>
+                                                    <th className="p-4">Platform / Details</th>
+                                                    <th className="p-4">Finances</th>
+                                                    <th className="p-4">Worker</th>
+                                                    <th className="p-4">Status</th>
+                                                    <th className="p-4 text-center">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {orders.filter(o => o.status === 'completed').map(ord => {
+                                                    const m = calculateOrderMetrics(ord);
+                                                    const count = getCustomerOrderCount(ord.whatsapp || ord.customerName);
+                                                    return (
+                                                        <tr key={ord.id} className="hover:bg-slate-50/50">
+                                                            <td className="p-4">
+                                                                <p className="font-bold text-slate-800">{ord.customerName}</p>
+                                                                <span className="inline-block bg-slate-100 text-slate-600 text-[10px] px-2 py-0.5 rounded-full">
+                                                                    Orders: {count}
+                                                                </span>
+                                                            </td>
+                                                            <td className="p-4">
+                                                                <p className="text-xs font-bold text-indigo-600">{ord.platform}</p>
+                                                                <p className="text-xs text-slate-600">{ord.dressCode}</p>
+                                                            </td>
+                                                            <td className="p-4 text-xs">
+                                                                <div>Price: ₹{m.price}</div>
+                                                                <div className="text-emerald-600 font-bold">Profit: ₹{m.grossProfit}</div>
+                                                            </td>
+                                                            <td className="p-4 text-xs font-medium text-slate-600">{ord.assignedEmp || 'N/A'}</td>
+                                                            <td className="p-4">
+                                                                <span className="bg-emerald-100 text-emerald-700 text-xs px-2.5 py-1 rounded-full font-bold">
+                                                                    Completed
+                                                                </span>
+                                                            </td>
+                                                            <td className="p-4 text-center space-x-2">
+                                                                <button 
+                                                                    onClick={() => toggleOrderStatus(ord.id)}
+                                                                    title="Reopen Order"
+                                                                    className="bg-amber-100 text-amber-700 p-2 rounded-lg hover:bg-amber-200">
+                                                                    <i className="fa-solid fa-rotate-left"></i>
+                                                                </button>
+                                                                <button 
+                                                                    onClick={() => handleDeleteOrder(ord.id)}
+                                                                    className="bg-rose-100 text-rose-700 p-2 rounded-lg hover:bg-rose-200">
+                                                                    <i className="fa-solid fa-trash"></i>
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                        {orders.filter(o => o.status === 'completed').length === 0 && (
+                                            <div className="text-center py-8 text-slate-400">പൂർത്തിയായ ഓർഡറുകൾ ഒന്നും ഇതിൽ ഇല്ല</div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 5. EMPLOYEE MANAGEMENT PAGE */}
+                        {currentPage === 'employees' && (
+                            <div className="space-y-6 max-w-4xl mx-auto">
+                                <h2 className="text-2xl font-bold text-slate-800">ജീവനക്കാരുടെ പേജ് (Employee Management)</h2>
+
+                                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                                    <h3 className="text-sm font-bold text-slate-700 mb-3">
+                                        {editingEmpIndex !== null ? 'ജീവനക്കാരന്റെ പേര് എഡിറ്റ് ചെയ്യുക' : 'പുതിയ ജീവനക്കാരനെ ചേർക്കുക'}
+                                    </h3>
+                                    <form onSubmit={handleAddEmployee} className="flex gap-3">
+                                        <input 
+                                            type="text" required
+                                            value={newEmpName}
+                                            onChange={e => setNewEmpName(e.target.value)}
+                                            placeholder="Employee Name"
+                                            className="flex-1 p-2.5 border border-slate-200 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                                        />
+                                        <button 
+                                            type="submit" 
+                                            className="bg-indigo-600 text-white px-5 py-2.5 rounded-lg font-medium hover:bg-indigo-700">
+                                            {editingEmpIndex !== null ? 'Update' : 'Save'}
+                                        </button>
+                                    </form>
+                                </div>
+
+                                <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                                    <div className="p-4 bg-slate-50 border-b border-slate-100">
+                                        <h3 className="font-bold text-slate-700 text-sm">ജീവനക്കാരുടെ ലിസ്റ്റ് ({employees.length})</h3>
+                                    </div>
+                                    <div className="divide-y divide-slate-100">
+                                        {employees.map((emp, index) => {
+                                            const completedByEmp = orders.filter(o => o.assignedEmp === emp && o.status === 'completed').length;
+                                            const pendingByEmp = orders.filter(o => o.assignedEmp === emp && o.status === 'pending').length;
+                                            return (
+                                                <div key={index} className="p-4 flex items-center justify-between hover:bg-slate-50">
+                                                    <div>
+                                                        <h4 className="font-bold text-slate-800">{emp}</h4>
+                                                        <p className="text-xs text-slate-400 mt-0.5">
+                                                            Completed Orders: <span className="text-emerald-600 font-bold">{completedByEmp}</span> | 
+                                                            Pending: <span className="text-amber-600 font-bold">{pendingByEmp}</span>
+                                                        </p>
+                                                    </div>
+                                                    <div className="space-x-2">
+                                                        <button 
+                                                            onClick={() => handleEditEmp(index)}
+                                                            className="px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-semibold hover:bg-blue-100">
+                                                            Edit
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => handleDeleteEmp(index)}
+                                                            className="px-3 py-1.5 bg-rose-50 text-rose-600 rounded-lg text-xs font-semibold hover:bg-rose-100">
+                                                            Delete
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 6. DATA ANALYSIS PAGE */}
+                        {currentPage === 'analysis' && (
+                            <AnalysisView 
+                                orders={orders} 
+                                startDate={analysisStartDate}
+                                setStartDate={setAnalysisStartDate}
+                                endDate={analysisEndDate}
+                                setEndDate={setAnalysisEndDate}
+                                calculateOrderMetrics={calculateOrderMetrics}
+                            />
+                        )}
+
+                    </main>
+                </div>
+            );
+        }
+
+        // Sub-component for Analysis & Chart rendering
+        function AnalysisView({ orders, startDate, setStartDate, endDate, setEndDate, calculateOrderMetrics }) {
+            const chartRef = useRef(null);
+            const chartInstance = useRef(null);
+
+            // Filter orders based on date range
+            const filteredOrders = orders.filter(o => {
+                if (!o.deliveryDate) return true;
+                if (startDate && o.deliveryDate < startDate) return false;
+                if (endDate && o.deliveryDate > endDate) return false;
+                return true;
+            });
+
+            // Analytics Math
+            let totalRev = 0;
+            let totalProf = 0;
+            let totalExp = 0;
+            let bebiProfit = 0;
+            let lediProfit = 0;
+
+            filteredOrders.forEach(o => {
+                const m = calculateOrderMetrics(o);
+                totalRev += m.price;
+                totalProf += m.grossProfit;
+                totalExp += m.totalExpense;
+                if (o.platform === 'BEBI') bebiProfit += m.grossProfit;
+                if (o.platform === 'LEDI') lediProfit += m.grossProfit;
+            });
+
+            // Render Chart
+            useEffect(() => {
+                if (chartRef.current) {
+                    if (chartInstance.current) {
+                        chartInstance.current.destroy();
+                    }
+
+                    const ctx = chartRef.current.getContext('2d');
+                    chartInstance.current = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: ['Total Revenue', 'Total Profit', 'Total Expense', 'BEBI Profit', 'LEDI Profit'],
+                            datasets: [{
+                                label: 'തുക (₹)',
+                                data: [totalRev, totalProf, totalExp, bebiProfit, lediProfit],
+                                backgroundColor: [
+                                    '#10b981',
+                                    '#6366f1',
+                                    '#f43f5e',
+                                    '#ec4899',
+                                    '#8b5cf6'
+                                ]
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            plugins: {
+                                legend: { display: false }
+                            }
+                        }
+                    });
+                }
+            }, [startDate, endDate, orders]);
+
+            return (
+                <div className="space-y-6">
+                    <h2 className="text-2xl font-bold text-slate-800">ഡാറ്റ അനാലിസിസ് & ഗ്രാഫ് (Data Analysis)</h2>
+
+                    {/* Date Base Filter */}
+                    <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-wrap gap-4 items-end">
+                        <div>
+                            <label className="text-xs font-bold text-slate-500 block mb-1">ഫ്രം ഡേറ്റ് (Start Date)</label>
+                            <input 
+                                type="date" 
+                                value={startDate}
+                                onChange={e => setStartDate(e.target.value)}
+                                className="p-2 border border-slate-200 rounded-lg text-sm"
+                            />
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-slate-500 block mb-1">ടു ഡേറ്റ് (End Date)</label>
+                            <input 
+                                type="date" 
+                                value={endDate}
+                                onChange={e => setEndDate(e.target.value)}
+                                className="p-2 border border-slate-200 rounded-lg text-sm"
+                            />
+                        </div>
+                        <button 
+                            onClick={() => { setStartDate(''); setEndDate(''); }}
+                            className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-200">
+                            Reset Filter
+                        </button>
+                    </div>
+
+                    {/* Stats Summary */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="bg-white p-4 rounded-xl border border-slate-100">
+                            <p className="text-xs text-slate-400 font-bold">ഫിൽട്ടർ ചെയ്ത ഓർഡറുകൾ</p>
+                            <p className="text-xl font-black text-slate-700 mt-1">{filteredOrders.length}</p>
+                        </div>
+                        <div className="bg-white p-4 rounded-xl border border-slate-100">
+                            <p className="text-xs text-slate-400 font-bold">Revenue</p>
+                            <p className="text-xl font-black text-emerald-600 mt-1">₹{totalRev.toLocaleString()}</p>
+                        </div>
+                        <div className="bg-white p-4 rounded-xl border border-slate-100">
+                            <p className="text-xs text-slate-400 font-bold">Profit</p>
+                            <p className="text-xl font-black text-indigo-600 mt-1">₹{totalProf.toLocaleString()}</p>
+                        </div>
+                        <div className="bg-white p-4 rounded-xl border border-slate-100">
+                            <p className="text-xs text-slate-400 font-bold">Expense</p>
+                            <p className="text-xl font-black text-rose-600 mt-1">₹{totalExp.toLocaleString()}</p>
+                        </div>
+                    </div>
+
+                    {/* Math & Analytical Chart */}
+                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                        <h3 className="font-bold text-slate-700 mb-4">പെർഫോമൻസ് ഗ്രാഫ് (Math Model Visual)</h3>
+                        <canvas ref={chartRef} id="analysisChart"></canvas>
+                    </div>
+                </div>
+            );
+        }
+
+        // Render App
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
